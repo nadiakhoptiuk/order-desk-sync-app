@@ -2,21 +2,27 @@ const express = require("express");
 const dotenv = require("dotenv");
 const logger = require("morgan");
 const cors = require("cors");
-const { syncOrdersHourly } = require("./service/syncOrdersHourly");
-const { registerLogStream } = require("./service/registerLogStream");
+const { logStream } = require("./service/registerLogStream");
 const errorHandler = require("./middlewares/errorsHandler");
+const { syncOrdersByInterval } = require("./service/syncOrdersByInterval");
+const { convertToMs } = require("./service/convertToMs");
 
 const app = express();
 
 dotenv.config();
 
+// For convenience in this app user has ability to change interval for synchronization at environment variables
+const intervalInMins = process.env.INTERVAL_IN_MINUTES || 60;
+
 app.use(express.json());
 app.use(cors());
 
-app.use(logger("combined", { stream: registerLogStream }));
+// set up logger for write system logs to a particular file
+app.use(logger("combined", { stream: logStream }));
 
-syncOrdersHourly();
-setInterval(syncOrdersHourly, 60000);
+// main functionality for synchronization
+syncOrdersByInterval();
+setInterval(syncOrdersByInterval, convertToMs(intervalInMins));
 
 app.use((req, res, next) => {
   const error = new Error("Not found");
