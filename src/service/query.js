@@ -5,6 +5,19 @@ const {
   finishWritingLogs,
   streamReader,
 } = require("./registerLogStream");
+const dotenv = require("dotenv");
+const { convertObjectToString } = require("../utils/convertObjectToString");
+
+dotenv.config();
+
+const axiosInstance = axios.create({
+  baseURL: "https://app.orderdesk.me/api/v2/orders",
+  headers: {
+    "Content-Type": "application/json",
+    "ORDERDESK-STORE-ID": process.env.ORDERDESK_STORE_ID,
+    "ORDERDESK-API-KEY": process.env.ORDERDESK_API_KEY,
+  },
+});
 
 // create get query to Open Desk API, where headers are gotten from env for authentication and different variables are used in query params of endpoint
 const queryToOpenDesk = (
@@ -13,29 +26,27 @@ const queryToOpenDesk = (
   reportDate,
   intervalInMin
 ) => {
-  axios
-    .get(
-      `https://app.orderdesk.me/api/v2/orders?folder_id=320309&search_start_date=${startOfInterval}&search_end_date=${endOfInterval}&order_by=date_added&limit=500`,
-      {
-        headers: {
-          "ORDERDESK-STORE-ID": process.env.ORDERDESK_STORE_ID,
-          "ORDERDESK-API-KEY": process.env.ORDERDESK_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    )
+  axiosInstance
+    .get("", {
+      params: {
+        folder_id: 320309,
+        search_start_date: startOfInterval,
+        search_end_date: endOfInterval,
+        order_by: "date_added",
+        limit: 500,
+      },
+    })
     .then((res) => {
       const { orders } = res.data;
 
-      //  report data creating
-      const newReport = {
-        report_time_locale: reportDate.toString(),
-        report_time_utc: reportDate.toUTCString(),
-        interval: `within the last ${intervalInMin} minutes`,
-        orders: [],
-      };
+      const reportTimeLocale = reportDate.toString();
+      const reportTimeUtc = reportDate.toUTCString();
 
       let existedData = "";
+
+      streamWriter.write(
+        `\nReport within the last ${intervalInMin} minutes\nREPORT TIME:\nlocale:\t${reportTimeLocale}\nUTC:\t${reportTimeUtc}\nNEW ORDERS:\n`
+      );
 
       streamReader.on("data", (chunk) => {
         // Обробка отриманих даних
@@ -44,6 +55,10 @@ const queryToOpenDesk = (
 
       // Checking new ids for duplicates
       streamReader.on("end", () => {
+        if (orders.length === 0) {
+          streamWriter.write(`There are no new orders\n`);
+        }
+
         orders?.forEach((order) => {
           const { id, shipping } = order;
 
@@ -51,29 +66,26 @@ const queryToOpenDesk = (
             return;
           }
 
-          const newData = {
-            order_id: id,
-            shipping_address: shipping,
-            date_added_by_locale: new Date(order.date_added).toString(),
-            date_added_by_utc: order.date_added,
-          };
+          const shippingString = convertObjectToString(shipping);
 
-          newReport.orders.push(newData);
+          // write report to system logs
+          streamWriter.write(
+            `- Order ID \t ${id}\t Shipping address:\t${shippingString}\n`
+          );
         });
-
-        // write report to system logs
-        streamWriter.write(`${JSON.stringify(newReport)}\n\n`);
-        console.log(newReport);
       });
     })
     .catch((err) => {
-      const errorData = {
-        report_time: new Date().toLocaleString(),
-        error: axiosErrorHandler(err),
-      };
+      const reportTimeLocale = reportDate.toString();
+      const reportTimeUtc = reportDate.toUTCString();
 
-      console.log({ Error: errorData.error });
-      streamWriter.write(`${JSON.stringify(errorData)}\n\n`);
+      const errorMessage = axiosErrorHandler(err);
+
+      streamWriter.write(
+        `\nReport within the last ${intervalInMin} minutes\nREPORT TIME:\nlocale:\t${reportTimeLocale}\nUTC:\t${reportTimeUtc}\nERROR:\n${errorMessage}\n`
+      );
+
+      console.log(err.message);
 
       //   finishing writing system logs
       finishWritingLogs();
