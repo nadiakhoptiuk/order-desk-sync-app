@@ -1,6 +1,10 @@
 const axios = require("axios");
-const { axiosErrorHandler } = require("./axiosErrorHandler");
-const { logStream, finishWritingLogs } = require("./registerLogStream");
+const { axiosErrorHandler } = require("../utils/axiosErrorHandler");
+const {
+  streamWriter,
+  finishWritingLogs,
+  streamReader,
+} = require("./registerLogStream");
 
 // create get query to Open Desk API, where headers are gotten from env for authentication and different variables are used in query params of endpoint
 const queryToOpenDesk = (
@@ -31,23 +35,36 @@ const queryToOpenDesk = (
         orders: [],
       };
 
-      orders?.forEach((order) => {
-        const { id, shipping } = order;
+      let existedData = "";
 
-        const newData = {
-          order_id: id,
-          shipping_address: shipping,
-          date_added_by_locale: new Date(order.date_added).toString(),
-          date_added_by_utc: order.date_added,
-        };
-
-        newReport.orders.push(newData);
+      streamReader.on("data", (chunk) => {
+        // Обробка отриманих даних
+        existedData = chunk;
       });
 
-      console.log(newReport);
+      // Checking new ids for duplicates
+      streamReader.on("end", () => {
+        orders?.forEach((order) => {
+          const { id, shipping } = order;
 
-      // write report to system logs
-      logStream.write(`${JSON.stringify(newReport)}\n\n`);
+          if (existedData.includes(id)) {
+            return;
+          }
+
+          const newData = {
+            order_id: id,
+            shipping_address: shipping,
+            date_added_by_locale: new Date(order.date_added).toString(),
+            date_added_by_utc: order.date_added,
+          };
+
+          newReport.orders.push(newData);
+        });
+
+        // write report to system logs
+        streamWriter.write(`${JSON.stringify(newReport)}\n\n`);
+        console.log(newReport);
+      });
     })
     .catch((err) => {
       const errorData = {
@@ -56,7 +73,7 @@ const queryToOpenDesk = (
       };
 
       console.log({ Error: errorData.error });
-      logStream.write(`${JSON.stringify(errorData)}\n\n`);
+      streamWriter.write(`${JSON.stringify(errorData)}\n\n`);
 
       //   finishing writing system logs
       finishWritingLogs();

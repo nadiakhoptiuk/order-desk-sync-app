@@ -2,10 +2,10 @@ const express = require("express");
 const dotenv = require("dotenv");
 const logger = require("morgan");
 const cors = require("cors");
-const { logStream } = require("./service/registerLogStream");
 const errorHandler = require("./middlewares/errorsHandler");
 const { syncOrdersByInterval } = require("./service/syncOrdersByInterval");
-const { convertToMs } = require("./service/convertToMs");
+const { convertToMs } = require("./utils/convertToMs");
+const { streamWriter } = require("./service/registerLogStream");
 
 const app = express();
 
@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(cors());
 
 // set up logger for write system logs to a particular file
-app.use(logger("combined", { stream: logStream }));
+app.use(logger("combined", { stream: streamWriter }));
 
 // main functionality for synchronization
 syncOrdersByInterval();
