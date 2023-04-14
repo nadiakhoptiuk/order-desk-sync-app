@@ -3,82 +3,87 @@ const { axiosErrorHandler } = require("../utils/axiosErrorHandler");
 const {
   streamWriter,
   finishWritingLogs,
-  streamReader,
-} = require("./registerLogStream");
+  readOrders,
+} = require("./registeWriterAndReader");
+const dotenv = require("dotenv");
+const { convertObjectToString } = require("../utils/convertObjectToString");
+const { cutData } = require("../utils/cutReadData");
+
+dotenv.config();
+
+const axiosInstance = axios.create({
+  baseURL: "https://app.orderdesk.me/api/v2/orders",
+  headers: {
+    "Content-Type": "application/json",
+    "ORDERDESK-STORE-ID": process.env.ORDERDESK_STORE_ID,
+    "ORDERDESK-API-KEY": process.env.ORDERDESK_API_KEY,
+  },
+});
 
 // create get query to Open Desk API, where headers are gotten from env for authentication and different variables are used in query params of endpoint
-const queryToOpenDesk = (
+const queryToOpenDesk = async (
   startOfInterval,
   endOfInterval,
   reportDate,
   intervalInMin
 ) => {
-  axios
-    .get(
-      `https://app.orderdesk.me/api/v2/orders?folder_id=320309&search_start_date=${startOfInterval}&search_end_date=${endOfInterval}&order_by=date_added&limit=500`,
-      {
-        headers: {
-          "ORDERDESK-STORE-ID": process.env.ORDERDESK_STORE_ID,
-          "ORDERDESK-API-KEY": process.env.ORDERDESK_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    )
-    .then((res) => {
-      const { orders } = res.data;
-
-      //  report data creating
-      const newReport = {
-        report_time_locale: reportDate.toString(),
-        report_time_utc: reportDate.toUTCString(),
-        interval: `within the last ${intervalInMin} minutes`,
-        orders: [],
-      };
-
-      let existedData = "";
-
-      streamReader.on("data", (chunk) => {
-        // Обробка отриманих даних
-        existedData = chunk;
-      });
-
-      // Checking new ids for duplicates
-      streamReader.on("end", () => {
-        orders?.forEach((order) => {
-          const { id, shipping } = order;
-
-          if (existedData.includes(id)) {
-            return;
-          }
-
-          const newData = {
-            order_id: id,
-            shipping_address: shipping,
-            date_added_by_locale: new Date(order.date_added).toString(),
-            date_added_by_utc: order.date_added,
-          };
-
-          newReport.orders.push(newData);
-        });
-
-        // write report to system logs
-        streamWriter.write(`${JSON.stringify(newReport)}\n\n`);
-        console.log(newReport);
-      });
-    })
-    .catch((err) => {
-      const errorData = {
-        report_time: new Date().toLocaleString(),
-        error: axiosErrorHandler(err),
-      };
-
-      console.log({ Error: errorData.error });
-      streamWriter.write(`${JSON.stringify(errorData)}\n\n`);
-
-      //   finishing writing system logs
-      finishWritingLogs();
-      process.exit(1);
+  try {
+    const res = await axiosInstance.get("", {
+      params: {
+        folder_id: 320309,
+        search_start_date: startOfInterval,
+        search_end_date: endOfInterval,
+        order_by: "date_added",
+        limit: 500,
+      },
     });
+
+    const { orders } = res.data;
+    const reportTimeLocale = reportDate.toString();
+
+    streamWriter.write(
+      `\nREPORT TIME (locale):\t${reportTimeLocale}\nNEW ORDERS within the last ${intervalInMin} minutes:\n`
+    );
+
+    // check if there are new orders in CRM per interval
+    if (orders.length === 0) {
+      streamWriter.write(`There are no new orders\n`);
+      return;
+    }
+
+    // read and return the last report from system logs
+    const existedData = await readOrders();
+    const reducedData = cutData(existedData);
+
+    orders?.forEach((order) => {
+      const { id, shipping } = order;
+
+      // Checking new ids for duplicates with ids from the last report from system logs
+      if (reducedData.includes(id)) {
+        return;
+      }
+
+      const shippingString = convertObjectToString(shipping);
+
+      // write report to system logs
+      streamWriter.write(
+        `- Order ID \t ${id}\t Shipping address:\t${shippingString}\n`
+      );
+    });
+  } catch (err) {
+    const reportTimeLocale = reportDate.toString();
+    const { message, error } = axiosErrorHandler(err);
+
+    // write report to system logs
+    streamWriter.write(
+      `\nERROR TIME (locale):\t${reportTimeLocale}\nERROR:\n${message}\n`
+    );
+    console.log(error);
+
+    //   finishing writing system logs
+    finishWritingLogs();
+    process.exit(1);
+  }
 };
 
 module.exports = {
