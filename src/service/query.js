@@ -3,10 +3,11 @@ const { axiosErrorHandler } = require("../utils/axiosErrorHandler");
 const {
   streamWriter,
   finishWritingLogs,
-  streamReader,
-} = require("./registerLogStream");
+  readOrders,
+} = require("./registeWriterAndReader");
 const dotenv = require("dotenv");
 const { convertObjectToString } = require("../utils/convertObjectToString");
+const { cutData } = require("../utils/cutReadData");
 
 dotenv.config();
 
@@ -20,14 +21,14 @@ const axiosInstance = axios.create({
 });
 
 // create get query to Open Desk API, where headers are gotten from env for authentication and different variables are used in query params of endpoint
-const queryToOpenDesk = (
+const queryToOpenDesk = async (
   startOfInterval,
   endOfInterval,
   reportDate,
   intervalInMin
 ) => {
-  axiosInstance
-    .get("", {
+  try {
+    const res = await axiosInstance.get("", {
       params: {
         folder_id: 320309,
         search_start_date: startOfInterval,
@@ -35,62 +36,54 @@ const queryToOpenDesk = (
         order_by: "date_added",
         limit: 500,
       },
-    })
-    .then((res) => {
-      const { orders } = res.data;
-
-      const reportTimeLocale = reportDate.toString();
-      const reportTimeUtc = reportDate.toUTCString();
-
-      let existedData = "";
-
-      streamWriter.write(
-        `\nReport within the last ${intervalInMin} minutes\nREPORT TIME:\nlocale:\t${reportTimeLocale}\nUTC:\t${reportTimeUtc}\nNEW ORDERS:\n`
-      );
-
-      streamReader.on("data", (chunk) => {
-        // Обробка отриманих даних
-        existedData = chunk;
-      });
-
-      // Checking new ids for duplicates
-      streamReader.on("end", () => {
-        if (orders.length === 0) {
-          streamWriter.write(`There are no new orders\n`);
-        }
-
-        orders?.forEach((order) => {
-          const { id, shipping } = order;
-
-          if (existedData.includes(id)) {
-            return;
-          }
-
-          const shippingString = convertObjectToString(shipping);
-
-          // write report to system logs
-          streamWriter.write(
-            `- Order ID \t ${id}\t Shipping address:\t${shippingString}\n`
-          );
-        });
-      });
-    })
-    .catch((err) => {
-      const reportTimeLocale = reportDate.toString();
-      const reportTimeUtc = reportDate.toUTCString();
-
-      const errorMessage = axiosErrorHandler(err);
-
-      streamWriter.write(
-        `\nReport within the last ${intervalInMin} minutes\nREPORT TIME:\nlocale:\t${reportTimeLocale}\nUTC:\t${reportTimeUtc}\nERROR:\n${errorMessage}\n`
-      );
-
-      console.log(err.message);
-
-      //   finishing writing system logs
-      finishWritingLogs();
-      process.exit(1);
     });
+
+    const { orders } = res.data;
+    const reportTimeLocale = reportDate.toString();
+
+    streamWriter.write(
+      `\nREPORT TIME (locale):\t${reportTimeLocale}\nNEW ORDERS within the last ${intervalInMin} minutes:\n`
+    );
+
+    // check if there are new orders in CRM per interval
+    if (orders.length === 0) {
+      streamWriter.write(`There are no new orders\n`);
+      return;
+    }
+
+    // read and return the last report from system logs
+    const existedData = await readOrders();
+    const reducedData = cutData(existedData);
+
+    orders?.forEach((order) => {
+      const { id, shipping } = order;
+
+      // Checking new ids for duplicates with ids from the last report from system logs
+      if (reducedData.includes(id)) {
+        return;
+      }
+
+      const shippingString = convertObjectToString(shipping);
+
+      // write report to system logs
+      streamWriter.write(
+        `- Order ID \t ${id}\t Shipping address:\t${shippingString}\n`
+      );
+    });
+  } catch (err) {
+    const reportTimeLocale = reportDate.toString();
+    const { message, error } = axiosErrorHandler(err);
+
+    // write report to system logs
+    streamWriter.write(
+      `\nERROR TIME (locale):\t${reportTimeLocale}\nERROR:\n${message}\n`
+    );
+    console.log(error);
+
+    //   finishing writing system logs
+    finishWritingLogs();
+    process.exit(1);
+  }
 };
 
 module.exports = {
