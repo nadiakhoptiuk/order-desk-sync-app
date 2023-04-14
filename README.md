@@ -14,6 +14,6 @@ ___
 3. Create new file called '.env' in the root folder.
 Add environment variables to this file as shown in the .env.example file.
 
-4. Run the app by command 'npm run:dev'.
+4. Run the app by command 'npm run start:dev'.
 
 5. View new orders at the file '\src\systemLogs\orders.log'.
