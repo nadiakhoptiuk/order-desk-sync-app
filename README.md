@@ -9,11 +9,11 @@ ___
 
 1. Clone repo to your computer.
 
-2. Run npm install.
+2. Run 'npm install'.
 
 3. Create new file called '.env' in the root folder.
 Add environment variables to this file as shown in the .env.example file.
 
-4. Run the app by command 'npm run start:dev'.
+4. Run the app by command 'npm run start:dev' or 'npm start'.
 
 5. View new orders at the file '\src\systemLogs\orders.log'.
